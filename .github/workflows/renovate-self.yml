@@ -1,0 +1,23 @@
+name: Renovate
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: Report what would change without opening pull requests
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Calls the template from this checkout, so a change to it is exercised here first.
+  renovate:
+    uses: ./.github/workflows/renovate.yml
+    with:
+      dry-run: ${{ inputs.dryRun || false }}
+    secrets:
+      RENOVATE_TOKEN: ${{ secrets.RENOVATE_TOKEN }}

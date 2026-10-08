@@ -1,0 +1,57 @@
+name: Helm chart lint
+
+# Lints a chart and renders it with every CI values file; repo-specific assertions run through assert-command.
+on:
+  workflow_call:
+    inputs:
+      chart:
+        description: Chart directory, e.g. charts/teamster.
+        type: string
+        required: true
+      values-glob:
+        description: Values files, relative to the chart, each linted and rendered on its own. No match lints the defaults.
+        type: string
+        default: ci/*-values.yaml
+      assert-command:
+        description: Command run after rendering, e.g. "scripts/check-chart-render.sh charts/teamster". Empty skips it.
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  chart:
+    name: Chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # helm ships on the runner image, so there is no action to pin here.
+      - name: Lint and render every values file
+        env:
+          CHART: ${{ inputs.chart }}
+          VALUES_GLOB: ${{ inputs.values-glob }}
+        run: |
+          shopt -s nullglob
+          # Word splitting is the point here: it expands the glob.
+          # shellcheck disable=SC2206
+          files=( "$CHART"/$VALUES_GLOB )
+          if [ ${#files[@]} -eq 0 ]; then
+            helm lint "$CHART"
+            helm template ci "$CHART" > /dev/null
+            exit 0
+          fi
+          for values in "${files[@]}"; do
+            echo "::group::$values"
+            helm lint "$CHART" --values "$values"
+            helm template ci "$CHART" --values "$values" > /dev/null
+            echo "::endgroup::"
+          done
+
+      # Rendering proves the chart is not broken; it says nothing about a chart that is quietly wrong.
+      - name: Assert what the chart renders
+        if: inputs.assert-command != ''
+        env:
+          ASSERT_COMMAND: ${{ inputs.assert-command }}
+        run: eval "$ASSERT_COMMAND"
