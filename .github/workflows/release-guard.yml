@@ -1,0 +1,33 @@
+name: Release guard
+
+# Cheap and first in a release, so a tag that skipped review fails in seconds rather than after the full build.
+on:
+  workflow_call:
+    inputs:
+      branch:
+        description: Branch every release tag must be reachable from.
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Tag is on ${{ inputs.branch }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Refuse a tag that is not reachable from the release branch
+        env:
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          git fetch --no-tags origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/${BRANCH}"; then
+            echo "::error::${GITHUB_REF_NAME} (${GITHUB_SHA}) is not reachable from ${BRANCH} - cut releases from ${BRANCH}"
+            exit 1
+          fi
+          echo "${GITHUB_REF_NAME} is reachable from ${BRANCH}"

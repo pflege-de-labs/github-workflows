@@ -1,0 +1,129 @@
+name: SecObserve image scan
+
+# Uploads an image's SBOMs and a Trivy scan to SecObserve. Reports, never gates: an outage there must not fail a build.
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: Image name without tag, e.g. the image output of image-build or image-release.
+        type: string
+        required: true
+      digest:
+        description: Digest to scan, so a tag moved after the build cannot change what is scanned.
+        type: string
+        required: true
+      tag:
+        description: Tag recorded as the scanned image's name in SecObserve.
+        type: string
+        required: true
+      product-name:
+        description: SecObserve product. Defaults to the repository name.
+        type: string
+        default: ""
+      branch-name:
+        description: SecObserve branch. Defaults to the ref name, so each release tag is tracked on its own.
+        type: string
+        default: ""
+      platforms:
+        description: Platforms whose SBOM attestation is uploaded.
+        type: string
+        default: linux/amd64,linux/arm64
+      api-base-url:
+        description: SecObserve API base URL.
+        type: string
+        default: https://webhooks.management.p4e.io/secobserve
+    secrets:
+      SO_API_TOKEN:
+        description: SecObserve API token of the product.
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  # Run directly rather than via upstream's upload_sbom action, whose entrypoint cannot report failure.
+  SCANNER_IMAGE: ghcr.io/secobserve/secobserve-scanners:2026_08@sha256:7dd952f02a9a8262b61399bb65abdeea9c8b5b8628aa4788ba7d411d198931ab
+
+jobs:
+  secobserve:
+    name: SecObserve
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      SO_API_BASE_URL: ${{ inputs.api-base-url }}
+      SO_API_TOKEN: ${{ secrets.SO_API_TOKEN }}
+      SO_PRODUCT_NAME: ${{ inputs.product-name || github.event.repository.name }}
+      SO_BRANCH_NAME: ${{ inputs.branch-name || github.ref_name }}
+      SO_ORIGIN_SERVICE: ${{ inputs.product-name || github.event.repository.name }}
+      REF: ${{ inputs.image }}@${{ inputs.digest }}
+    steps:
+      # The SBOM is read from the registry, which a private image only answers when logged in.
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # buildx keys a multi-platform .SBOM by platform, SecObserve wants a bare SPDX document.
+      - name: Extract the image's SBOM attestations to files
+        id: sbom_extract
+        continue-on-error: true
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          docker buildx imagetools inspect "$REF" --format '{{ json .SBOM }}' > sbom-raw.json
+          for platform in ${PLATFORMS//,/ }; do
+            out="sbom-$(echo "$platform" | tr '/' '-').json"
+            jq --arg p "$platform" '.[$p].SPDX' sbom-raw.json > "$out"
+            if ! jq -e 'has("SPDXID") and has("spdxVersion")' "$out" > /dev/null; then
+              echo "::error::${out} is not a bare SPDX document"
+              exit 1
+            fi
+          done
+
+      # One upload per platform: SecObserve keys a vulnerability check on the file name, so both land.
+      - name: Upload the SBOMs to SecObserve
+        id: sbom_upload
+        if: steps.sbom_extract.outcome == 'success'
+        continue-on-error: true
+        run: |
+          for sbom in sbom-linux-*.json; do
+            docker run --rm -v "${PWD}:/workspace" -w /workspace \
+              -e SO_API_BASE_URL -e SO_API_TOKEN -e SO_PRODUCT_NAME \
+              -e SO_BRANCH_NAME -e SO_ORIGIN_SERVICE -e SO_FILE_NAME="$sbom" \
+              --entrypoint /entrypoints/entrypoint_upload_sbom.sh \
+              "$SCANNER_IMAGE"
+          done
+
+      - name: Scan the image with Trivy and upload results to SecObserve
+        id: trivy_scan
+        continue-on-error: true
+        uses: SecObserve/secobserve_actions_templates/actions/SCA/trivy_image@0a0f7d0981982a589f2a11c3f05c8e1c628fbd79 # v2026_08
+        with:
+          target: ${{ env.REF }}
+          report_name: trivy-image-report.cdx.json
+          so_api_base_url: ${{ env.SO_API_BASE_URL }}
+          so_api_token: ${{ secrets.SO_API_TOKEN }}
+          so_product_name: ${{ env.SO_PRODUCT_NAME }}
+          so_branch_name: ${{ env.SO_BRANCH_NAME }}
+          so_origin_service: ${{ env.SO_ORIGIN_SERVICE }}
+          so_origin_docker_image_name_tag: ${{ inputs.image }}:${{ inputs.tag }}
+
+      - name: Report the SecObserve upload outcome
+        if: ${{ !cancelled() }}
+        env:
+          EXTRACT_OUTCOME: ${{ steps.sbom_extract.outcome }}
+          SBOM_OUTCOME: ${{ steps.sbom_upload.outcome }}
+          TRIVY_OUTCOME: ${{ steps.trivy_scan.outcome }}
+        run: |
+          failed=""
+          if [ "$EXTRACT_OUTCOME" = "failure" ] || [ "$SBOM_OUTCOME" = "failure" ]; then failed="${failed} SBOM"; fi
+          if [ "$TRIVY_OUTCOME" = "failure" ]; then failed="${failed} Trivy"; fi
+          if [ -z "$failed" ]; then exit 0; fi
+          echo "::warning::SecObserve upload failed for:${failed} - see the step logs"
+          {
+            echo "> [!WARNING]"
+            echo "> SecObserve upload failed for:${failed}"
+          } >> "$GITHUB_STEP_SUMMARY"

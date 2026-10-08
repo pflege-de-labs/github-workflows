@@ -1,0 +1,107 @@
+name: Helm chart release
+
+# Publishes every chart whose Chart.yaml version has no GitHub release yet to ghcr.io/<owner>/charts.
+on:
+  workflow_call:
+    inputs:
+      charts-dir:
+        description: Directory holding one chart per subdirectory.
+        type: string
+        default: charts
+      helm-version:
+        description: Helm version the releaser installs.
+        type: string
+        default: v4.2.3
+      sign:
+        description: Sign each released chart version with cosign, keyless. Needs id-token write.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  # Keyless certificates name the workflow that signed, which is this one, not the caller's.
+  SIGNER_WORKFLOW: ^https://github\.com/pflege-de-labs/github-workflows/\.github/workflows/helm-release\.yml@
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    # Two pushes must not race on the same release.
+    concurrency:
+      group: chart-release-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The releaser compares against the latest tag.
+          fetch-depth: 0
+
+      # chart-releaser tags and pushes, so it needs an identity.
+      - name: Configure git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      # The registry path has to be lowercase, the owner does not have to be.
+      - name: Resolve the registry
+        id: registry
+        run: echo "registry=ghcr.io/$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')/charts" >> "$GITHUB_OUTPUT"
+
+      - uses: bitdeps/helm-oci-charts-releaser@caedceea2a5ab997c7e5469a999811dbb3d5b070 # v0.1.5
+        with:
+          version: ${{ inputs.helm-version }}
+          charts_dir: ${{ inputs.charts-dir }}
+          oci_registry: ${{ steps.registry.outputs.registry }}
+          oci_username: ${{ github.actor }}
+          oci_password: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          skip_existing: true
+          skip_gh_release: false
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        if: inputs.sign
+
+      - name: Install crane
+        if: inputs.sign
+        env:
+          # renovate: datasource=github-releases depName=google/go-containerregistry
+          CRANE_VERSION: v0.22.1
+          # sha256 of go-containerregistry_Linux_x86_64.tar.gz, update it together with the version (see checksums.txt in the release).
+          CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+        run: |
+          curl -fsSL -o crane.tar.gz \
+            "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "${CRANE_SHA256}  crane.tar.gz" | sha256sum --check --strict
+          tar -xzf crane.tar.gz crane
+          sudo install -m 0755 crane /usr/local/bin/crane
+
+      # The releaser reports what it released unreliably, so sign each Chart.yaml version unless it is signed already.
+      - name: Sign the charts
+        if: inputs.sign
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHARTS_DIR: ${{ inputs.charts-dir }}
+          REGISTRY: ${{ steps.registry.outputs.registry }}
+        run: |
+          echo "$GH_TOKEN" | crane auth login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for chart in "$CHARTS_DIR"/*/Chart.yaml; do
+            name=$(sed -n 's/^name: *//p' "$chart")
+            version=$(sed -n 's/^version: *//p' "$chart")
+            digest=$(crane digest "$REGISTRY/$name:$version")
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::could not read digest of $name:$version"; exit 1; }
+            ref="$REGISTRY/$name@$digest"
+            if cosign verify "$ref" \
+                --certificate-identity-regexp "$SIGNER_WORKFLOW" \
+                --certificate-github-workflow-repository "$GITHUB_REPOSITORY" \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null 2>&1; then
+              echo "$name:$version is already signed"
+            else
+              cosign sign --yes "$ref"
+            fi
+          done
