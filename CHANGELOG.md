@@ -7,6 +7,8 @@ permission a caller has to grant anew, is a major release.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-08
+
 ### Added
 
 * `go-checks`: build, vet, gofmt, tests with an optional coverage gate, module tidiness,
