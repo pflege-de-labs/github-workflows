@@ -1,0 +1,184 @@
+name: Image release
+
+# Builds, signs and verifies the image of a vX.Y.Z tag. Call it from a workflow triggered by the tag push.
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: Image name without tag. Defaults to ghcr.io/<owner>/<repo>.
+        type: string
+        default: ""
+      context:
+        description: Build context.
+        type: string
+        default: "."
+      file:
+        description: Dockerfile path. Empty uses <context>/Dockerfile.
+        type: string
+        default: ""
+      platforms:
+        description: Platforms to build.
+        type: string
+        default: linux/amd64,linux/arm64
+      tag-pattern:
+        description: Glob of the release tags, used to find the newest stable one.
+        type: string
+        default: v*
+      build-args:
+        description: Further build args, one KEY=value per line. VERSION is always the tag.
+        type: string
+        default: ""
+      version-check:
+        description: Run the image with --version and require the tag in its output.
+        type: boolean
+        default: false
+    outputs:
+      image:
+        description: Image name without tag.
+        value: ${{ jobs.image.outputs.image }}
+      digest:
+        description: Digest every release tag resolves to.
+        value: ${{ jobs.image.outputs.digest }}
+
+permissions:
+  contents: read
+
+env:
+  # Keyless certificates name the workflow that signed, which is this one, not the caller's.
+  SIGNER_WORKFLOW: ^https://github\.com/pflege-de-labs/github-workflows/\.github/workflows/image-release\.yml@
+
+jobs:
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      image: ${{ steps.name.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the image name
+        id: name
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: echo "image=$(echo "${IMAGE:-ghcr.io/${GITHUB_REPOSITORY}}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      # :latest follows the highest stable tag, not the tip of main, which can move between the tag push and this run.
+      - name: Decide whether this release owns :latest
+        id: latest
+        env:
+          PATTERN: ${{ inputs.tag-pattern }}
+        run: |
+          case "$GITHUB_REF_NAME" in
+            *-*)
+              echo "$GITHUB_REF_NAME is a pre-release, leaving :latest alone"
+              echo "owns=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+          newest=$(git tag --list "$PATTERN" --sort=-v:refname | grep -v -- '-' | head -n 1)
+          if [ "$newest" = "$GITHUB_REF_NAME" ]; then
+            echo "$GITHUB_REF_NAME is the newest stable tag, it owns :latest"
+            echo "owns=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$newest is newer than $GITHUB_REF_NAME, leaving :latest alone"
+            echo "owns=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Collect release metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index,manifest
+        with:
+          images: ${{ steps.name.outputs.image }}
+          flavor: latest=${{ steps.latest.outputs.owns }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      # One build feeds every release tag (one digest); cache-from only, so a release never evicts CI's cache entries.
+      - name: Build and push the release image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.file }}
+          platforms: ${{ inputs.platforms }}
+          push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            ${{ inputs.build-args }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha
+
+      # -X silently no-ops on a wrong symbol path, so an image reporting "dev" would otherwise ship unnoticed.
+      - name: Check the version was linked in
+        if: inputs.version-check
+        env:
+          IMAGE: ${{ steps.name.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          got=$(docker run --rm "${IMAGE}@${DIGEST}" --version)
+          case "$got" in
+            *"${GITHUB_REF_NAME}"*) echo "version reports ${got}" ;;
+            *) echo "::error::image reports '${got}', expected ${GITHUB_REF_NAME}"; exit 1 ;;
+          esac
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign the image
+        env:
+          IMAGE: ${{ steps.name.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      # The identity is this workflow; the workflow-repository claim pins the signature to the caller.
+      - name: Verify the signature and the attestations
+        env:
+          IMAGE: ${{ steps.name.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "$SIGNER_WORKFLOW" \
+            --certificate-github-workflow-repository "$GITHUB_REPOSITORY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE}@${DIGEST}" > /dev/null
+          # buildx attaches SBOM and provenance as in-toto attestations on the index, so assert them here, not via cosign.
+          for kind in SBOM Provenance; do
+            if ! docker buildx imagetools inspect "${IMAGE}@${DIGEST}" \
+              --format "{{ json .${kind} }}" | grep -q .; then
+              echo "::error::the image carries no ${kind} attestation"
+              exit 1
+            fi
+            echo "${kind} attestation present"
+          done
+          {
+            echo "### Image"
+            echo
+            echo '```'
+            echo "${IMAGE}@${DIGEST}"
+            echo '```'
+            echo
+            echo "Tags: ${TAGS}" | tr '\n' ' '
+          } >> "$GITHUB_STEP_SUMMARY"

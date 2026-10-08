@@ -1,0 +1,184 @@
+name: Go checks
+
+# One gate for CI and for the release of a tag, so the two cannot drift apart.
+on:
+  workflow_call:
+    inputs:
+      go-version:
+        description: Go version to set up, e.g. "stable". Takes precedence over go-version-file.
+        type: string
+        default: ""
+      go-version-file:
+        description: File whose go/toolchain directive selects the Go version.
+        type: string
+        default: go.mod
+      test-command:
+        description: Command that runs the tests. Coverage is reported when it leaves coverage.out behind.
+        type: string
+        default: go test ./... -coverprofile=coverage.out
+      coverage-threshold:
+        description: Minimum total statement coverage in percent; 0 reports coverage without gating on it.
+        type: number
+        default: 0
+      gofmt:
+        description: Fail when gofmt would change a file.
+        type: boolean
+        default: true
+      modules:
+        description: Whitespace-separated module directories that must be go mod tidy.
+        type: string
+        default: "."
+      generate-command:
+        description: Command that regenerates committed output, e.g. "make generate". Empty skips the check.
+        type: string
+        default: ""
+      generate-diff-args:
+        description: Extra git diff arguments for the generated-output check, e.g. "-I '^\.TH ' -- docs/man".
+        type: string
+        default: ""
+      golangci-lint-version:
+        description: golangci-lint version to run. Empty skips linting.
+        type: string
+        default: ""
+      govulncheck:
+        description: Run govulncheck.
+        type: boolean
+        default: true
+      gosec-version:
+        description: gosec version to run. Empty skips gosec.
+        type: string
+        # renovate: datasource=go depName=github.com/securego/gosec/v2
+        default: v2.29.0
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # setup-go prefers go-version when both are set, so the file is only passed without it.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go-version }}
+          go-version-file: ${{ inputs.go-version == '' && inputs.go-version-file || '' }}
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Check formatting
+        if: inputs.gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needed on:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Test
+        env:
+          TEST_COMMAND: ${{ inputs.test-command }}
+        run: eval "$TEST_COMMAND"
+
+      - name: Report coverage
+        if: hashFiles('coverage.out') != ''
+        env:
+          THRESHOLD: ${{ inputs.coverage-threshold }}
+        run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ { sub("%", "", $3); print $3 }')
+          echo "Total coverage: ${total}%"
+          {
+            echo "### Coverage"
+            echo
+            echo "Total statement coverage: **${total}%**"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if awk -v t="$total" -v min="$THRESHOLD" 'BEGIN { exit !(t < min) }'; then
+            echo "::error::coverage ${total}% is below ${THRESHOLD}%"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always() && hashFiles('coverage.out') != ''
+        with:
+          name: coverage
+          path: coverage.out
+
+      - name: Check the modules are tidy
+        env:
+          MODULES: ${{ inputs.modules }}
+        run: |
+          for dir in $MODULES; do
+            (cd "$dir" && go mod tidy)
+          done
+          if ! git diff --quiet -- '*go.mod' '*go.sum'; then
+            echo "::error::go.mod/go.sum are not tidy - run 'go mod tidy' in: ${MODULES}"
+            git --no-pager diff -- '*go.mod' '*go.sum'
+            exit 1
+          fi
+
+      # A stale generated file compiles and runs the old code, so only regenerating and diffing catches it.
+      - name: Check the generated output is current
+        if: inputs.generate-command != ''
+        env:
+          GENERATE_COMMAND: ${{ inputs.generate-command }}
+          DIFF_ARGS: ${{ inputs.generate-diff-args }}
+        run: |
+          eval "$GENERATE_COMMAND"
+          if ! eval "git diff --exit-code $DIFF_ARGS"; then
+            echo "::error::generated output is stale - run '${GENERATE_COMMAND}' and commit the result"
+            exit 1
+          fi
+
+  lint:
+    name: Lint
+    if: inputs.golangci-lint-version != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go-version }}
+          go-version-file: ${{ inputs.go-version == '' && inputs.go-version-file || '' }}
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
+        with:
+          version: ${{ inputs.golangci-lint-version }}
+
+  vuln-check:
+    name: Vulnerability Check
+    if: inputs.govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go-version }}
+          go-version-file: ${{ inputs.go-version == '' && inputs.go-version-file || '' }}
+
+      # @latest on purpose: a vulnerability scanner pinned to an old version misses new advisories.
+      - name: Run govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  gosec:
+    name: Security Scan (gosec)
+    if: inputs.gosec-version != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Built with the repo's toolchain; the gosec Docker action bundles its own Go, which can lag go.mod.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go-version }}
+          go-version-file: ${{ inputs.go-version == '' && inputs.go-version-file || '' }}
+
+      - name: Run gosec
+        env:
+          GOSEC_VERSION: ${{ inputs.gosec-version }}
+        run: go run "github.com/securego/gosec/v2/cmd/gosec@${GOSEC_VERSION}" -quiet ./...

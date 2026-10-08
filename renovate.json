@@ -1,6 +1,67 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "baseBranchPatterns": [
+    "main"
+  ],
+  "timezone": "Europe/Berlin",
+  "prConcurrentLimit": 5,
+  "rebaseWhen": "behind-base-branch",
+  "labels": [
+    "dependencies"
+  ],
+  "platformAutomerge": true,
+  "packageRules": [
+    {
+      "description": "Every caller runs what lands here, so nothing merges itself; a person reviews and cuts the release.",
+      "matchPackageNames": [
+        "*"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "Actions are pinned to a commit sha; one PR per run keeps the pins in step across templates.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "groupName": "github actions"
+    },
+    {
+      "description": "The scanner image and the trivy_image action pin are one SecObserve release and move together.",
+      "matchPackageNames": [
+        "ghcr.io/secobserve/secobserve-scanners",
+        "SecObserve/secobserve_actions_templates"
+      ],
+      "groupName": "secobserve"
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "SCANNER_IMAGE is a plain `docker run` argument, not a `uses:` reference, so the github-actions manager does not see it.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/[^/]+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "SCANNER_IMAGE:\\s+(?<depName>[^\\s:@]+):(?<currentValue>[^\\s@]+)@(?<currentDigest>sha256:[0-9a-f]+)"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "description": "Versions in env values and input defaults, marked with a `# renovate:` comment on the line above.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/[^/]+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+[\\w-]+:\\s+(?<currentValue>v[\\d.]+)"
+      ],
+      "versioningTemplate": "semver"
+    }
   ]
 }
