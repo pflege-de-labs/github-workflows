@@ -1,7 +1,7 @@
 # github-workflows
 
 Reusable GitHub Actions workflows for the pflege-de-labs repositories: Go checks, container
-images, Go release binaries, Helm charts, SecObserve and Renovate. They were extracted from
+images, Go release binaries, Helm charts and SecObserve. They were extracted from
 teamster, compactor, tranquila and nats-auth-callout. Why they are shaped the way they are is in
 [ADR 0001](docs/adr/0001-one-repository-of-reusable-workflows.md).
 
@@ -15,7 +15,6 @@ teamster, compactor, tranquila and nats-auth-callout. Why they are shaped the wa
 | [`go-binaries`](#go-binaries) | release binaries, SBOMs, signed checksums, GitHub release |
 | [`helm-lint`](#helm-lint) | lint and render a chart per CI values file |
 | [`helm-release`](#helm-release) | publish charts to `ghcr.io/<owner>/charts`, optionally signed |
-| [`renovate`](#renovate) | self-hosted Renovate |
 
 ## Using them
 
@@ -167,16 +166,6 @@ creates the release `<chart>-<version>`. Call it on pushes to `main` that touch 
 | `helm-version` | `v4.2.3` | |
 | `sign` | `false` | sign each chart version that is not signed yet |
 
-## renovate
-
-Permissions: `contents: read`. Secret: `RENOVATE_TOKEN`, a token whose pull requests trigger CI,
-which a `GITHUB_TOKEN` one does not. Renovate reads the caller's own `renovate.json`.
-
-| Input | Default |
-| --- | --- |
-| `dry-run` | `false` |
-| `log-level` | `info` |
-
 ## Example: a Go service
 
 ```yaml
@@ -269,6 +258,9 @@ jobs:
 ```
 
 ## Developing
+
+Dependencies are updated by the Renovate GitHub App from [renovate.json](renovate.json); nothing
+merges itself, since every caller runs what lands here.
 
 Pull requests run [actionlint](https://github.com/rhysd/actionlint) (with shellcheck) over every
 workflow. Run it locally with `actionlint`. Templates stay flat in `.github/workflows/` (GitHub

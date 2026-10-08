@@ -7,7 +7,7 @@
 
 teamster, compactor, tranquila and nats-auth-callout carry copies of the same jobs: Go checks,
 a CI image build, a tagged image release with cosign and attestations, Go release binaries, Helm
-chart publishing, SecObserve uploads and self-hosted Renovate. The copies have drifted. Action pins
+chart publishing and SecObserve uploads. The copies have drifted. Action pins
 differ by a patch. compactor uploads SBOMs to SecObserve without gating, teamster's Trivy step
 fails the build. nats-auth-callout signs its charts, the others do not.
 
@@ -36,6 +36,9 @@ ones included, without an Actions access level.
   SecObserve input. Callers pin a commit sha with the tag in a comment, as for any other action,
   and Renovate moves them.
 * SecObserve reports and never gates, which was compactor's and tranquila's behaviour.
+
+Renovate is not a template: the Renovate GitHub App runs it for the labs repositories, which
+replaces the self-hosted workflows teamster and compactor carried.
 
 Alternatives: composite actions cannot hold several jobs, permissions or services, and would
 still need a workflow per caller. A template repository copies once and then drifts like today.

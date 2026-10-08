@@ -21,4 +21,3 @@ permission a caller has to grant anew, is a major release.
   release.
 * `helm-lint` and `helm-release`: chart lint and render per values file, and OCI publishing to
   `ghcr.io/<owner>/charts` with optional signing.
-* `renovate`: self-hosted Renovate with a caller-provided token.
