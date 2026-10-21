@@ -1,0 +1,67 @@
+name: SecObserve trivyignore
+description: >-
+  Fetches the .trivyignore.yaml compiled from the repository's approved SecObserve assessments.
+  Never fails: without the file the Trivy gate runs without suppressions, which is stricter.
+  The calling job needs `permissions: id-token: write`.
+
+inputs:
+  url:
+    description: Endpoint of secobserve-trivyignore.
+    default: https://webhooks.management.p4e.io/trivyignore/v1/trivyignore
+  audience:
+    description: Audience of the OIDC token, must match the service's --audience.
+    default: secobserve-trivyignore
+  product:
+    description: SecObserve product, only needed when several products share the repository.
+    default: ""
+
+outputs:
+  ignorefile:
+    description: Path of the fetched .trivyignore.yaml, empty when none could be fetched. Pass it to trivy-action's trivyignores.
+    value: ${{ steps.fetch.outputs.ignorefile }}
+
+runs:
+  using: composite
+  steps:
+    - name: Fetch the trivyignore file from SecObserve
+      id: fetch
+      shell: bash
+      env:
+        URL: ${{ inputs.url }}
+        AUDIENCE: ${{ inputs.audience }}
+        PRODUCT: ${{ inputs.product }}
+      run: |
+        set -uo pipefail
+        file="${RUNNER_TEMP}/secobserve.trivyignore.yaml"
+        rm -f "$file"
+        warn() {
+          echo "::warning::trivyignore: $1 - the Trivy gate runs without SecObserve suppressions"
+          { echo "> [!WARNING]"; echo "> trivyignore: $1. The Trivy gate runs without SecObserve suppressions."; } >> "$GITHUB_STEP_SUMMARY"
+          echo "ignorefile=" >> "$GITHUB_OUTPUT"
+          exit 0
+        }
+
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+          warn "no OIDC token available, the job needs permissions: id-token: write"
+        fi
+        token=$(curl -sS --fail --max-time 20 \
+          -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+          --get --data-urlencode "audience=${AUDIENCE}" "${ACTIONS_ID_TOKEN_REQUEST_URL}" | jq -r .value) \
+          || warn "requesting the OIDC token failed"
+        echo "::add-mask::${token}"
+
+        query=()
+        if [ -n "$PRODUCT" ]; then query=(--get --data-urlencode "product=${PRODUCT}"); fi
+        status=$(curl -sS --max-time 30 -o "$file" -D "${RUNNER_TEMP}/trivyignore.headers" -w '%{http_code}' \
+          -H "Authorization: Bearer ${token}" "${query[@]}" "$URL") || warn "the service is unreachable"
+        if [ "$status" != 200 ]; then
+          body=$(head -c 200 "$file" 2>/dev/null || true)
+          rm -f "$file"
+          warn "the service answered HTTP ${status} (${body})"
+        fi
+
+        entries=$(grep -c '^  *- id:' "$file" || true)
+        age=$(grep -i '^x-cache-age:' "${RUNNER_TEMP}/trivyignore.headers" | tr -dc '0-9')
+        echo "trivyignore: ${entries} suppression(s) from SecObserve, list ${age:-?}s old"
+        echo "SecObserve trivyignore: ${entries} suppression(s), list ${age:-?}s old" >> "$GITHUB_STEP_SUMMARY"
+        echo "ignorefile=${file}" >> "$GITHUB_OUTPUT"
