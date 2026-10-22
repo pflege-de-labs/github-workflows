@@ -7,6 +7,11 @@ permission a caller has to grant anew, is a major release.
 
 ## [Unreleased]
 
+### Added
+
+* `github-release`: the GitHub release of a tag with generated notes, optionally naming the
+  image digest; for image-only releases, which had no GitHub release.
+
 ## [1.0.0] - 2026-10-08
 
 ### Added
