@@ -7,6 +7,8 @@ permission a caller has to grant anew, is a major release.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-22
+
 ### Added
 
 * `github-release`: the GitHub release of a tag with generated notes, optionally naming the
