@@ -12,6 +12,7 @@ teamster, compactor, tranquila and nats-auth-callout. Why they are shaped the wa
 | [`image-release`](#image-release) | release image of a tag, signed, attested, verified |
 | [`secobserve-image`](#secobserve-image) | SBOM and Trivy upload to SecObserve, never gating |
 | [`release-guard`](#release-guard) | refuses a tag that is not on `main` |
+| [`github-release`](#github-release) | GitHub release of a tag, optionally naming the image digest |
 | [`go-binaries`](#go-binaries) | release binaries, SBOMs, signed checksums, GitHub release |
 | [`helm-lint`](#helm-lint) | lint and render a chart per CI values file |
 | [`helm-release`](#helm-release) | publish charts to `ghcr.io/<owner>/charts`, optionally signed |
@@ -126,6 +127,19 @@ so short-lived PR branches do not appear in SecObserve.
 
 Permissions: `contents: read`. Input `branch`, default `main`. Run it first in a release and have
 the rest `needs:` it.
+
+## github-release
+
+Permissions: `contents: write`.
+
+Publishes the GitHub release of the tag with generated notes. A tag with a `-` suffix becomes a
+pre-release. For an image release, have it `needs:` `image-release` and pass its outputs so the
+notes name the pullable digest. `go-binaries` publishes its own release; don't add both.
+
+| Input | Default | |
+| --- | --- | --- |
+| `image` | `""` | e.g. `${{ needs.image.outputs.image }}`; empty leaves the image out of the notes |
+| `digest` | `""` | required when `image` is set |
 
 ## go-binaries
 
