@@ -11,6 +11,13 @@ permission a caller has to grant anew, is a major release.
 
 * `actions/trivyignore`: fetches the `.trivyignore.yaml` compiled from approved SecObserve
   assessments for a Trivy gate; never fails the job.
+  
+## [1.1.0] - 2026-10-22
+
+### Added
+
+* `github-release`: the GitHub release of a tag with generated notes, optionally naming the
+  image digest; for image-only releases, which had no GitHub release.
 
 ## [1.0.0] - 2026-10-08
 
