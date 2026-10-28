@@ -48,7 +48,7 @@ on:
         description: gosec version to run. Empty skips gosec.
         type: string
         # renovate: datasource=go depName=github.com/securego/gosec/v2
-        default: v2.29.0
+        default: v2.30.0
 
 permissions:
   contents: read
