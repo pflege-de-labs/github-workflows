@@ -42,7 +42,7 @@ permissions:
 
 env:
   # Run directly rather than via upstream's upload_sbom action, whose entrypoint cannot report failure.
-  SCANNER_IMAGE: ghcr.io/secobserve/secobserve-scanners:2026_09@sha256:d32e7740a671927a3152da4d58ce1247b6634fc769625b441d795fb2f0468510
+  SCANNER_IMAGE: ghcr.io/secobserve/secobserve-scanners:2026_10@sha256:cbb88e5cd93d48d3c2126ae61d279f6f015c920b8ef5a459f0197ef189199a97
 
 jobs:
   secobserve:
