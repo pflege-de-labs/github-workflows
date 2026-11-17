@@ -113,6 +113,11 @@ Uploads each platform's SBOM attestation and a Trivy scan of the digest. A faile
 warning and a note in the job summary, never a failed run. Skip it for pull requests in the caller,
 so short-lived PR branches do not appear in SecObserve.
 
+The SecObserve API base URL comes from the caller's Actions variable `SECOBSERVE_API_BASE_URL`
+unless `api-base-url` is passed. It is defined as an organization variable in `pflege-de`,
+`pflege-de-labs` and `webcarelbj`, managed in `pflege-de/github-ops`; a repository variable of the
+same name overrides it.
+
 | Input | Default | |
 | --- | --- | --- |
 | `image` | required | name without tag |
@@ -121,7 +126,7 @@ so short-lived PR branches do not appear in SecObserve.
 | `product-name` | repository name | also the origin service |
 | `branch-name` | `github.ref_name` | a release tag is tracked as its own branch |
 | `platforms` | `linux/amd64,linux/arm64` | |
-| `api-base-url` | `https://webhooks.management.p4e.io/secobserve` | |
+| `api-base-url` | variable `SECOBSERVE_API_BASE_URL` | without either, the upload is skipped with a warning |
 
 ## actions/trivyignore
 

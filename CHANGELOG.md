@@ -7,6 +7,12 @@ permission a caller has to grant anew, is a major release.
 
 ## [Unreleased]
 
+### Changed
+
+* `secobserve-image`: **breaking**, `api-base-url` has no built-in default any more; it falls back
+  to the caller's `SECOBSERVE_API_BASE_URL` variable, and without either the upload is skipped
+  with a warning.
+
 ## [1.2.0] - 2026-11-17
 
 ### Added
