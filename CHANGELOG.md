@@ -7,6 +7,8 @@ permission a caller has to grant anew, is a major release.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-17
+
 ### Changed
 
 * `secobserve-image`: **breaking**, `api-base-url` has no built-in default any more; it falls back
