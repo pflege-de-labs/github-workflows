@@ -138,7 +138,7 @@ empty, the gate runs without suppressions and the job summary says why.
       - id: trivyignore
         uses: pflege-de-labs/github-workflows/actions/trivyignore@<sha> # vX.Y.Z
         with:
-          url: https://webhooks.management.p4e.io/trivyignore/v1/trivyignore
+          url: https://trivyignore.example.org/v1/trivyignore
       - uses: aquasecurity/trivy-action@<sha>
         with:
           trivyignores: ${{ steps.trivyignore.outputs.ignorefile }}

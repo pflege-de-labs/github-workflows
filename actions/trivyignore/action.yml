@@ -6,7 +6,7 @@ description: >-
 
 inputs:
   url:
-    description: Endpoint of secobserve-trivyignore, e.g. https://webhooks.management.p4e.io/trivyignore/v1/trivyignore.
+    description: Endpoint of secobserve-trivyignore, e.g. https://trivyignore.example.org/v1/trivyignore.
     required: true
   audience:
     description: Audience of the OIDC token, must match the service's --audience.
