@@ -6,8 +6,10 @@ description: >-
 
 inputs:
   url:
-    description: Endpoint of secobserve-trivyignore, e.g. https://trivyignore.example.org/v1/trivyignore.
-    required: true
+    description: >-
+      Endpoint of secobserve-trivyignore, e.g. https://trivyignore.example.org/v1/trivyignore.
+      Defaults to the TRIVYIGNORE_URL environment variable; one of the two must be set.
+    default: ""
   audience:
     description: Audience of the OIDC token, must match the service's --audience.
     default: secobserve-trivyignore
@@ -41,9 +43,10 @@ runs:
           exit 0
         }
 
-        # Composite actions do not enforce required inputs; a missing url is a caller bug, not an outage.
+        URL="${URL:-${TRIVYIGNORE_URL:-}}"
+        # A missing url is a caller bug, not an outage.
         if [ -z "$URL" ]; then
-          echo "::error::trivyignore: input url is required"
+          echo "::error::trivyignore: set input url or env TRIVYIGNORE_URL"
           exit 1
         fi
         if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then

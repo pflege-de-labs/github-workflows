@@ -131,8 +131,8 @@ A composite action, not a workflow: a step in the caller's gating job, before Tr
 Fetches the `.trivyignore.yaml` that
 [secobserve-trivyignore](https://github.com/pflege-de-labs/secobserve-trivyignore) compiles from
 the repository's approved SecObserve assessments, authenticated by the job's GitHub OIDC token.
-It never fails once `url` is set: without a file (service down, no product, no token) the output is
-empty, the gate runs without suppressions and the job summary says why.
+It never fails once the url is set: without a file (service down, no product, no token) the output
+is empty, the gate runs without suppressions and the job summary says why.
 
 ```yaml
       - id: trivyignore
@@ -144,9 +144,12 @@ empty, the gate runs without suppressions and the job summary says why.
           trivyignores: ${{ steps.trivyignore.outputs.ignorefile }}
 ```
 
+Instead of `url`, set the `TRIVYIGNORE_URL` environment variable at workflow or job level, e.g.
+`TRIVYIGNORE_URL: ${{ vars.TRIVYIGNORE_URL }}` under `env:` to use an organization variable.
+
 | Input | Default | |
 | --- | --- | --- |
-| `url` | required | endpoint of secobserve-trivyignore |
+| `url` | env `TRIVYIGNORE_URL` | endpoint of secobserve-trivyignore; one of the two is required |
 | `audience` | `secobserve-trivyignore` | |
 | `product` | empty | only when several products share the repository |
 
