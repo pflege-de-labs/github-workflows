@@ -1,13 +1,13 @@
 name: SecObserve trivyignore
 description: >-
   Fetches the .trivyignore.yaml compiled from the repository's approved SecObserve assessments.
-  Never fails: without the file the Trivy gate runs without suppressions, which is stricter.
+  Never fails once configured: without the file the Trivy gate runs without suppressions, which is stricter.
   The calling job needs `permissions: id-token: write`.
 
 inputs:
   url:
-    description: Endpoint of secobserve-trivyignore.
-    default: https://webhooks.management.p4e.io/trivyignore/v1/trivyignore
+    description: Endpoint of secobserve-trivyignore, e.g. https://webhooks.management.p4e.io/trivyignore/v1/trivyignore.
+    required: true
   audience:
     description: Audience of the OIDC token, must match the service's --audience.
     default: secobserve-trivyignore
@@ -41,6 +41,11 @@ runs:
           exit 0
         }
 
+        # Composite actions do not enforce required inputs; a missing url is a caller bug, not an outage.
+        if [ -z "$URL" ]; then
+          echo "::error::trivyignore: input url is required"
+          exit 1
+        fi
         if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
           warn "no OIDC token available, the job needs permissions: id-token: write"
         fi

@@ -131,12 +131,14 @@ A composite action, not a workflow: a step in the caller's gating job, before Tr
 Fetches the `.trivyignore.yaml` that
 [secobserve-trivyignore](https://github.com/pflege-de-labs/secobserve-trivyignore) compiles from
 the repository's approved SecObserve assessments, authenticated by the job's GitHub OIDC token.
-It never fails: without a file (service down, no product, no token) the output is empty, the gate
-runs without suppressions and the job summary says why.
+It never fails once `url` is set: without a file (service down, no product, no token) the output is
+empty, the gate runs without suppressions and the job summary says why.
 
 ```yaml
       - id: trivyignore
         uses: pflege-de-labs/github-workflows/actions/trivyignore@<sha> # vX.Y.Z
+        with:
+          url: https://webhooks.management.p4e.io/trivyignore/v1/trivyignore
       - uses: aquasecurity/trivy-action@<sha>
         with:
           trivyignores: ${{ steps.trivyignore.outputs.ignorefile }}
@@ -144,7 +146,7 @@ runs without suppressions and the job summary says why.
 
 | Input | Default | |
 | --- | --- | --- |
-| `url` | `https://webhooks.management.p4e.io/trivyignore/v1/trivyignore` | |
+| `url` | required | endpoint of secobserve-trivyignore |
 | `audience` | `secobserve-trivyignore` | |
 | `product` | empty | only when several products share the repository |
 
