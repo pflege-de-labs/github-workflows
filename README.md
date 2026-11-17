@@ -123,6 +123,36 @@ so short-lived PR branches do not appear in SecObserve.
 | `platforms` | `linux/amd64,linux/arm64` | |
 | `api-base-url` | `https://webhooks.management.p4e.io/secobserve` | |
 
+## actions/trivyignore
+
+A composite action, not a workflow: a step in the caller's gating job, before Trivy. The job needs
+`permissions: id-token: write`.
+
+Fetches the `.trivyignore.yaml` that
+[secobserve-trivyignore](https://github.com/pflege-de-labs/secobserve-trivyignore) compiles from
+the repository's approved SecObserve assessments, authenticated by the job's GitHub OIDC token.
+It never fails once the url is set: without a file (service down, no product, no token) the output
+is empty, the gate runs without suppressions and the job summary says why.
+
+```yaml
+      - id: trivyignore
+        uses: pflege-de-labs/github-workflows/actions/trivyignore@<sha> # vX.Y.Z
+        with:
+          url: https://trivyignore.example.org/v1/trivyignore
+      - uses: aquasecurity/trivy-action@<sha>
+        with:
+          trivyignores: ${{ steps.trivyignore.outputs.ignorefile }}
+```
+
+Instead of `url`, set the `TRIVYIGNORE_URL` environment variable at workflow or job level, e.g.
+`TRIVYIGNORE_URL: ${{ vars.TRIVYIGNORE_URL }}` under `env:` to use an organization variable.
+
+| Input | Default | |
+| --- | --- | --- |
+| `url` | env `TRIVYIGNORE_URL` | endpoint of secobserve-trivyignore; one of the two is required |
+| `audience` | `secobserve-trivyignore` | |
+| `product` | empty | only when several products share the repository |
+
 ## release-guard
 
 Permissions: `contents: read`. Input `branch`, default `main`. Run it first in a release and have
