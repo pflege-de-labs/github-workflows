@@ -29,9 +29,9 @@ on:
         type: string
         default: linux/amd64,linux/arm64
       api-base-url:
-        description: SecObserve API base URL.
+        description: SecObserve API base URL. Defaults to the caller's SECOBSERVE_API_BASE_URL variable.
         type: string
-        default: https://webhooks.management.p4e.io/secobserve
+        default: ""
     secrets:
       SO_API_TOKEN:
         description: SecObserve API token of the product.
@@ -52,15 +52,30 @@ jobs:
       contents: read
       packages: read
     env:
-      SO_API_BASE_URL: ${{ inputs.api-base-url }}
+      SO_API_BASE_URL: ${{ inputs.api-base-url || vars.SECOBSERVE_API_BASE_URL }}
       SO_API_TOKEN: ${{ secrets.SO_API_TOKEN }}
       SO_PRODUCT_NAME: ${{ inputs.product-name || github.event.repository.name }}
       SO_BRANCH_NAME: ${{ inputs.branch-name || github.ref_name }}
       SO_ORIGIN_SERVICE: ${{ inputs.product-name || github.event.repository.name }}
       REF: ${{ inputs.image }}@${{ inputs.digest }}
     steps:
+      # Unconfigured is reported, not failed: SecObserve must never gate a build.
+      - name: Check the SecObserve configuration
+        id: config
+        run: |
+          if [ -n "$SO_API_BASE_URL" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::warning::SecObserve upload skipped: set input api-base-url or variable SECOBSERVE_API_BASE_URL"
+          {
+            echo "> [!WARNING]"
+            echo "> SecObserve upload skipped: set input \`api-base-url\` or variable \`SECOBSERVE_API_BASE_URL\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # The SBOM is read from the registry, which a private image only answers when logged in.
-      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+      - if: steps.config.outputs.configured == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -69,6 +84,7 @@ jobs:
       # buildx keys a multi-platform .SBOM by platform, SecObserve wants a bare SPDX document.
       - name: Extract the image's SBOM attestations to files
         id: sbom_extract
+        if: steps.config.outputs.configured == 'true'
         continue-on-error: true
         env:
           PLATFORMS: ${{ inputs.platforms }}
@@ -99,6 +115,7 @@ jobs:
 
       - name: Scan the image with Trivy and upload results to SecObserve
         id: trivy_scan
+        if: steps.config.outputs.configured == 'true'
         continue-on-error: true
         uses: SecObserve/secobserve_actions_templates/actions/SCA/trivy_image@0a0f7d0981982a589f2a11c3f05c8e1c628fbd79 # v2026_08
         with:
